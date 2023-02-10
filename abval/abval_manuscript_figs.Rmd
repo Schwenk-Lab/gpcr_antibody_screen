@@ -1,0 +1,359 @@
+---
+title: "Ab validation manuscript figures"
+author: "Leo Dahl"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+```
+
+Description
+===========
+
+> Making manuscript figures. 
+
+Packages and data
+=================
+
+```{r packages, message=F, warning=F}
+
+rm(list = ls())
+
+library(tidyverse)
+library(patchwork)
+library(data.table)
+library(ggbeeswarm)
+library(ComplexUpset)
+library(DescTools) # For Dunnett's test
+library(readxl)
+library(RColorBrewer)
+
+source("misc_functions.R")
+```
+
+```{r data}
+
+# Load minimal data used for shiny app and reshape to work with code in this script
+appdat <- readRDS("gpcr_mfi_data.rds")
+
+datlist <- sapply(c("r", "z", "rz"), function(x) {
+  # Data to base the list on
+  d <- appdat
+
+  # Names of value columns to keep or skip
+  val_skip <- paste0("value_", setdiff(c("r", "z", "rz"), x))
+  val_keep <- paste0("value_", x)
+  
+  d$expr_dat <- d$expr_dat %>% select(-!!val_skip) %>% rename("value" = !!val_keep)
+  d$abval_dat <- d$abval_dat %>% select(-!!val_skip) %>% rename("value" = !!val_keep) %>%
+    mutate(antibody = str_split(gene_id_ab, "\\.", simplify = T)[, 3])
+  d$abval_dat$gpcr_expr_ns_flag_capture_1d4_detect <- d$expr_dat[match(d$abval_dat$unique_sample_name, d$expr_dat$unique_sample_name), "gpcr_expr_ns_flag_capture_1d4_detect", drop = T]
+  # Use old (less neat-looking) subfamily labels to work with the code
+  d$abval_dat$subfamily <- d$abval_dat$subfamily_old
+  
+  d$expr_dat$sba <- d$abval_dat[match(d$expr_dat$unique_sample_name, d$abval_dat$unique_sample_name), "sba", drop = T]
+  d$expr_dat$subfamily <- d$abval_dat[match(d$expr_dat$unique_sample_name, d$abval_dat$unique_sample_name), "subfamily", drop = T]
+  
+  return(d)
+}, simplify = F)
+
+rdat <- datlist$r
+zdat <- datlist$z
+rzdat <- datlist$rz
+
+rm(datlist, appdat)
+
+out_dir <- "../results/"
+
+```
+
+```{r}
+# Common ggplot theme to use unless too big
+plt_theme <- theme(axis.line = element_line(size = 1),
+                   axis.text = element_text(size = 12),
+                   axis.title = element_text(size = 14),
+                   legend.text = element_text(size = 12),
+                   legend.title = element_text(size = 14))
+```
+
+Plots
+=====
+
+GPCR expression beeswarms (individual Abs)
+------------------------------------------
+
+```{r abval bsw plots, eval=F}
+# Beeswarm plots for each Ab
+# Get cutoff for each Ab to include in plot
+ab_val_results <- ab_validation(rzdat$abval_dat, rzdat$prot, n_sd = 12, excl_posctrl = T) %>%
+  select(gene_name_id, signal_threshold) %>%
+  rename("ab" = "gene_name_id") # Rename to avoid conflict with other data frame
+
+abval_bsw <- rzdat$abval_dat %>%
+  filter(is.na(exclude)) %>%
+  group_by(gene_name_id) %>%
+  nest() %>%
+  mutate(plt = map(data, ~ {
+    .x %>% filter(gpcr_code != "positive IK19") %>%
+      select(value, target) %>%
+      arrange(target) %>%
+      ggplot(aes(x = 0, y = value, colour = target), size = 0.5) +
+      geom_beeswarm(priority = "none") +
+      geom_hline(yintercept = ab_val_results %>% filter(ab == gene_name_id) %>% pull(signal_threshold), linetype = "dashed") +
+      scale_colour_manual(values = c("Target" = "blue", "Other" = "grey")) +
+      labs(x = NULL, y = "Robust Z-score", colour = NULL, title = gene_name_id) +
+      theme_classic(10) +
+      theme(axis.text.x = element_blank(),
+            axis.ticks.x = element_blank())
+  })) %>%
+  arrange(gene_name_id) %>%
+  pull(plt)
+
+```
+
+```{r save abval bsw plots, eval=F}
+
+# Split into 16 plots per page
+splits <- split(seq_along(abval_bsw), ceiling(seq_along(abval_bsw) / 16))
+abval_bsw_name <- paste0(out_dir, format(Sys.time(),"%Y-%m-%d_%H%M%S"), "_abval_bsw.pdf")
+pdf(file = abval_bsw_name, onefile = T, width = 10, height = 9, useDingbats = F)
+for (i in seq_along(splits)) {
+  print(
+    wrap_plots(abval_bsw[splits[[i]]], guides = "collect")
+  )
+}
+dev.off()
+
+```
+
+Plots saved as `r abval_bsw_name`.
+
+Ab validation summary
+---------------------
+
+```{r abval summary figure}
+
+pass_vs_sd_plt <- pass_vs_sd(rzdat, 1:30)
+
+# Antibody validation
+abval_n_var <- 12
+abval_excl_pos <- T
+det_res <- ab_validation(rzdat$abval_dat, rzdat$prot, n_sd = abval_n_var, excl_posctrl = abval_excl_pos)
+# Data frame for upset plot
+upset_df <- det_res %>%
+  mutate("crossreactive" = other_detected) %>%
+  select(gene_name_id, mean_signal_above_thr, pass, gpcr_expressed, crossreactive) %>%
+  rename(`On-target detection` = "mean_signal_above_thr",
+         "Pass" = "pass",
+         "GPCR expression" = "gpcr_expressed",
+         "Cross-reactivity" = "crossreactive") %>%
+  mutate(across(where(is.logical), as.numeric),
+         `GPCR expression` = case_when(`GPCR expression` == "supported" ~ T, `GPCR expression` == "uncertain" ~ F))
+
+# UpSet plot
+abval_upset <- mk_upset(upset_df %>% na.omit(), sets = c("Cross-reactivity", "On-target detection", "GPCR expression"),
+                        tag = "B", show_set_size = F, matrix_lab_pos = "right")
+
+# Histogram
+abval_hist <- mk_hist(det_res, rzdat$prot) + labs(tag = "C") + theme(plot.tag = element_text(size = 24))
+
+dsgn <- "
+###AA###
+BBBBCCCC
+"
+
+abval_sum <- (pass_vs_sd_plt +
+                scale_colour_manual(values = c("Crossreactive" = brewer.pal(3, "Set2")[2],
+                                               "On_target" = brewer.pal(3, "Set2")[1]),
+                                    labels = c("Crossreactive" = "Co-/Off-target",
+                                               "On_target" = "On-target")) +
+                geom_vline(xintercept = 12, linetype = "dashed") +
+                labs(tag = "A", x = "Number of SDs", y = "Number of Abs") +
+                theme(plot.tag = element_text(size = 24))) + 
+  abval_upset + abval_hist + plot_layout(design = dsgn)
+
+```
+
+```{r save abval summary}
+
+abval_sum_name <- paste0(out_dir, format(Sys.time(),"%Y-%m-%d_%H%M%S"), "_fig3.pdf")
+ggsave(plot = abval_sum, filename = abval_sum_name, height = 7*2, width = 7.3*2, device = "pdf", useDingbats = F)
+
+```
+
+Selected paired Ab beeswarms
+----------------------------
+
+```{r sel paired ab}
+
+sel_paired_bsw <- rzdat$abval_dat %>%
+  filter(gene_name %in% c("ADRA2B", "GRPR", "FSHR", "CCR7", "GPRC5D", "CRHR1", "GPR20", "GPR148", "FZD4", "FZD5"),
+         is.na(exclude),
+         gpcr_code != "positive IK19") %>%
+  select(gene_name, gpcr, subfamily, antibody, value, target, gene_name_id) %>%
+  unite("gene_ab", gene_name, antibody, remove = F, sep = "\n") %>%
+  # Better and ordered subfamily names
+  mutate(subfamily = case_when(subfamily == "alpha" ~ "'Rhodopsin '*alpha",
+                               subfamily == "beta" ~ "'Rhodopsin '*beta",
+                               subfamily == "gamma" ~ "'Rhodopsin '*gamma",
+                               subfamily == "delta" ~ "'Rhodopsin '*delta",
+                               subfamily %in% c("glutamate", "secretin", "adhesion", "frizzled", "other") ~ str_to_title(subfamily),
+                               T ~ subfamily)) %>%
+  mutate(subfamily = factor(subfamily, levels = c("'Rhodopsin '*alpha",
+                                                  "'Rhodopsin '*beta",
+                                                  "'Rhodopsin '*gamma",
+                                                  "'Rhodopsin '*delta",
+                                                  "Glutamate",
+                                                  "Secretin",
+                                                  "Other",
+                                                  "Frizzled"))) %>%
+  group_by(gene_name) %>%
+  # Rewrite subfamily to keep all points for plots
+  mutate(subfamily = unique(subfamily[target == "Target"])) %>%
+  ungroup() %>%
+  group_by(subfamily) %>%
+  nest() %>%
+  arrange(subfamily) %>%
+  mutate(plts = map(data, ~ {
+    
+    ggplot(.x %>% arrange(target), aes(x = 0, y = value, colour = target)) +
+      geom_beeswarm(priority = "none", show.legend = F, size = 1.5) +
+      geom_hline(data = det_res %>% filter(antibody %in% .x$antibody) %>%
+                   separate(gene_name_id, into = c("gene_name", "bead_id")) %>% unite("gene_ab", gene_name, antibody, sep = "\n"),
+                 mapping = aes(yintercept = signal_threshold), linetype = "dashed") +
+      # Add x axis line manually to get one in each facet
+      geom_hline(yintercept = -Inf, linetype = "solid", colour = "black", size = 1) +
+      facet_wrap(~ gene_ab, nrow = 2) +
+      scale_colour_manual(values = c("Target" = "blue", "Other" = "grey")) +
+      labs(x = NULL, y = "Robust Z-score", colour = NULL, title = parse(text = as.character(subfamily))) +
+      theme_classic(14) +
+      theme(axis.text.x = element_blank(),
+            axis.ticks.x = element_blank(),
+            axis.text.y = element_text(colour = "black"),
+            axis.ticks.y = element_line(colour = "black"),
+            strip.text = element_text(size = 10),
+            axis.line.x = element_blank(),
+            axis.title = element_text(size = 12))
+  })) %>%
+  pull(plts)
+
+sel_paired_combined <- 
+  (sel_paired_bsw[[1]] + sel_paired_bsw[[2]]) /
+  (sel_paired_bsw[[3]] + sel_paired_bsw[[4]]) /
+  (sel_paired_bsw[[5]] + plot_spacer() + sel_paired_bsw[[6]] + plot_layout(widths = c(2, 1, 3))) /
+  (sel_paired_bsw[[7]] + sel_paired_bsw[[8]] + plot_spacer() + plot_layout(widths = c(3, 2, 1))) /
+  plot_spacer() + plot_layout(heights = c(rep(1, 4), 4.5))
+
+```
+
+```{r}
+sel_paired_fn <- paste0(out_dir, format(Sys.time(),"%Y-%m-%d_%H%M%S"), "_fig4.pdf")
+ggsave(filename = sel_paired_fn, plot <- sel_paired_combined, width = 7.3, height = 22, units = "in",
+       device = "pdf", useDingbats = F)
+```
+
+
+GPCR expression (by subfamily)
+------------------------------
+
+and some pilot plots
+
+```{r gpcr expr plot}
+gpcr_expr_bsw <- mk_gpcr_expr_plot(rdat, stars = T, log_in = F)
+```
+
+```{r pilot gpcrmock plot}
+
+pilot_file <- "pilot_data.xlsx"
+
+# Binder info
+pilot_binder <- read_excel(pilot_file, sheet = 2)
+
+# MFI
+pilot_mfi <- read_excel(pilot_file, sheet = 4)
+
+# GPCR.mock expression to show that replicates are similar
+pilot_gpcr_mock_dat <- pilot_mfi %>% filter(GPCR_comment %in% c("mock", "ADRB2", "GPRC5A", "HCRTR2"),
+                                            detection_ab == "1D4",
+                                            interactor_comment == "mock") %>%
+  select(GPCR_comment, `M anti-FLAG.291`) %>%
+  rename("GPCR" = "GPCR_comment",
+         "FLAG" = "M anti-FLAG.291") %>%
+  mutate(GPCR = gsub("mock", "Mock", GPCR),
+         GPCR = factor(GPCR, levels = c("Mock", "ADRB2", "GPRC5A", "HCRTR2")))
+
+# Anova p
+cat("Anova results\n")
+summary(aov(FLAG ~ GPCR, data = pilot_gpcr_mock_dat))
+
+# Dunnett's multiple comparison test
+pilot_gpcr_mock_dunnt <- DunnettTest(x = pilot_gpcr_mock_dat$FLAG,
+                                     g = pilot_gpcr_mock_dat$GPCR,
+                                     control = "Mock")
+
+pilot_gpcr_mock_dunnt
+
+# Convert p-values to asterisks
+pilot_gpcr_mock_stars <- pilot_gpcr_mock_dunnt$Mock %>%
+  as.data.frame() %>%
+  rownames_to_column("gpcr_control") %>%
+  separate(gpcr_control, into = c("GPCR", "control"), sep = "-") %>%
+  select(GPCR, pval) %>%
+  mutate(stars = symnum(pval, cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1),
+                        symbols = c("****", "***", "**", "*", "n.s."), corr = F, legend = F) %>%
+           as.character())
+
+pilot_gpcr_mock <- ggplot(pilot_gpcr_mock_dat,
+                          aes(x = GPCR, y = log2(FLAG))) +
+  geom_beeswarm(colour = "grey70", size = 2, show.legend = F) +
+  stat_summary(fun = median, fun.min = median, fun.max = median,
+               geom = "errorbar", colour = "grey40", width = 0.2, size = 1.5) +
+  stat_summary(fun = median,
+               fun.min = function(a) quantile(a, 0.25),
+               fun.max = function(a) quantile(a, 0.75),
+               geom = "errorbar", colour = "grey40", width = 0.15, size = 1) +
+  theme_classic(14) +
+  ylim(4, 15) +
+  labs(y = "FLAG-capture\nlog2(MFI) [AU]", x = "GPCR", tag = "C") +
+  theme(axis.text = element_text(size = 14, colour = "black"),
+        axis.text.x = element_text(size = 13),
+        axis.ticks = element_line(colour = "black", size = 1),
+        axis.line = element_line(size = 1))
+
+# Add stars
+# Get y range from plot to place p-values
+y_range <- ggplot_build(pilot_gpcr_mock)$layout$panel_scales_y[[1]]$range$range
+y_pos <- max(y_range) + 0.05 * diff(y_range) # Place slightly above max y
+
+pilot_gpcr_mock <- pilot_gpcr_mock +
+  geom_text(data = pilot_gpcr_mock_stars, aes(label = stars), y = y_pos, size = 6) +
+  coord_cartesian(clip = "off")
+
+```
+
+```{r}
+# Combine the plots
+gpcr_expr_plt <- gpcr_expr_bsw[[1]] /
+  (gpcr_expr_bsw[[2]] + pilot_gpcr_mock)
+```
+
+```{r save gpcr expr plot}
+gexpr_name <- paste0(out_dir, format(Sys.time(),"%Y-%m-%d_%H%M%S"), "_fig2.pdf")
+ggsave(filename = gexpr_name, plot = gpcr_expr_plt, width = 8.5, height = 8, device = "pdf", useDingbats = F)
+```
+
+Plot saved as `r gexpr_name`.
+
+
+Session information
+===================
+
+```{r session information}
+sessionInfo()
+```

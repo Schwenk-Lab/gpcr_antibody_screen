@@ -1,0 +1,33 @@
+/* Links in GPCR info table */
+.gpcrlink:link, .gpcrlink:visited {
+  background-color: white;
+  padding: 10px 20px;
+  border-style: solid;
+  border-color: #73E6CF;
+  border-radius: 5px;
+  text-align: center;
+  font-size: 110%;
+  font-weight: bold;
+  display: inline-block;
+}
+.gpcrlink:hover {
+  background-color: #F5F5F5;
+}
+/* GPCR info table */
+table.gpcrinfo, table.gpcrinfo th, table.gpcrinfo td {
+  border: 5px solid white;
+  border-collapse: collapse;
+  font-size: 120%;
+}
+table.gpcrinfo td:nth-child(even) {
+  background-color: white;
+}
+table.gpcrinfo td:nth-child(odd) {
+  background-color: #F9F9F9;
+  font-weight: bold;
+}
+/* Horizontal rule in sidebar */
+hr.sidebarhr {
+  height: 1px;
+  background-color: #2C3E50;
+}
