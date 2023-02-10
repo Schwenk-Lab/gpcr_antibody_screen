@@ -2,7 +2,7 @@
 
 Leo Dahl, Ilana B. Kotliar, Annika Bendes, Tea Dodig-Crnković, Samuel Fromm, Arne Elofsson, Mathias Uhlén, Thomas P. Sakmar and Jochen M. Schwenk
 
-This repository contains code for analysis and visualisation (apart from the structural mapping, which can be found at [Elofsson Lab](https://github.com/ElofssonLab)) for the manuscript with the title above. 
+This repository contains code for analysis and visualisation (apart from the structural mapping, which can be found at [Elofsson Lab](https://github.com/ElofssonLab)) for the manuscript with the title above. Data can be found at [https://doi.org/10.17044/scilifelab.21907995](https://doi.org/10.17044/scilifelab.21907995).
 
 `abval`  
 contains code for the multiplex screening ("antibody validation").

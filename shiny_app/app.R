@@ -52,17 +52,17 @@ ui <- fluidPage(
       HTML("<p><strong>This app</strong> provides complementary visualizations for the Ab validation, such as data distributions for each individual GPCR,
            plots summarizing the on-target and off-target statuses of Abs, and comparisons between paired Abs binding the same GPCR.</p>"),
       HTML("<p><strong>Data</strong> used for the study can be found at the 
-           <a href='https://figshare.scilifelab.se' target='_blank' rel='noopener noreferrer'><strong> SciLifeLab Data Repository on FigShare </strong></a>
-           with the ID [Add ID!]<br>
+           <a href='https://figshare.scilifelab.se' target='_blank' rel='noopener noreferrer'>SciLifeLab Data Repository on FigShare</a>
+           with the DOI <a href='https://doi.org/10.17044/scilifelab.21907995' target='_blank' rel='noopener noreferrer'><strong>https://doi.org/10.17044/scilifelab.21907995</strong></a><br>
            and <strong> code </strong> used is found at the 
-           <a href='https://github.com/Schwenk-Lab/' target='_blank' rel='noopener noreferrer'><strong> Schwenk Lab </strong></a> and
-           <a href='https://github.com/ElofssonLab/' target='_blank' rel='noopener noreferrer'><strong> Elofsson Lab </strong></a> GitHub accounts. </p>"),
+           <a href='https://github.com/Schwenk-Lab/gpcr_antibody_screen' target='_blank' rel='noopener noreferrer'><strong> Schwenk Lab </strong></a> and
+           <a href='https://github.com/ElofssonLab/GPCR_structure_analysis' target='_blank' rel='noopener noreferrer'><strong> Elofsson Lab </strong></a> GitHub accounts. </p>"),
       hr(),
       HTML("App developed by Leo Dahl"), br(),
       HTML("App version 1.0.0"), br(),
       HTML("Using the bslib Flatly theme")
     ),
-  
+    
     tabPanel(
       "Antibody validation",
       sidebarLayout(
